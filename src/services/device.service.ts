@@ -129,4 +129,21 @@ export class DeviceService {
 
     return [file1, file2];
   }
+
+  async getAllDevices(): Promise<Device[]> {
+  return this.deviceRepository.find();
+}
+
+async getDeviceByDeviceId(deviceId: string): Promise<Device> {
+  const device = await this.deviceRepository.findOne({
+    where: {deviceId},
+  });
+
+  if (!device) {
+    throw new Error(`Device with deviceId ${deviceId} not found`);
+  }
+
+  return device;
+}
+
 }

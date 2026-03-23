@@ -1,6 +1,3 @@
-import {authenticate} from '@loopback/authentication';
-import {AUTHENTICATION_STRATEGY} from '../util/constants';
-// import {SecurityBindings, UserProfile} from '@loopback/security';
 import {inject} from '@loopback/core';
 import {
   Request,
@@ -34,11 +31,10 @@ const PING_RESPONSE: ResponseObject = {
   },
 };
 
-@authenticate(AUTHENTICATION_STRATEGY)
 export class PingController {
   constructor(
     // @inject(SecurityBindings.USER) private userProfile: UserProfile,
-    @inject(RestBindings.Http.REQUEST) 
+    @inject(RestBindings.Http.REQUEST)
     private req: Request
   ) {}
   @get('/ping')
