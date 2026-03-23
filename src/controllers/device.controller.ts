@@ -36,7 +36,7 @@ export class DeviceController {
       },
     })
     device: Omit<Device, 'id'>,
-  ): Promise<any> {
+  ): Promise<Device> {
     return this.deviceService.createDevice(device);
   }
 }

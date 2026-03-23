@@ -33,6 +33,12 @@ export class Device extends Entity {
   })
   url: string;
 
+  @property({
+    type: 'array',
+    itemType: 'string',
+  })
+  screenshots?: string[];
+
   constructor(data?: Partial<Device>) {
     super(data);
   }
