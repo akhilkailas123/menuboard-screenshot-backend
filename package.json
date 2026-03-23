@@ -49,6 +49,7 @@
     "!*/__tests__"
   ],
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1014.0",
     "@loopback/authentication": "^12.0.12",
     "@loopback/boot": "^8.0.11",
     "@loopback/core": "^7.0.10",
@@ -61,6 +62,7 @@
     "loopback-connector-postgresql": "^8.0.7",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "puppeteer": "^24.40.0",
     "tslib": "^2.0.0"
   },
   "devDependencies": {

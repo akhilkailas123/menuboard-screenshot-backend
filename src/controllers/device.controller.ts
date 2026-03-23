@@ -1,26 +1,20 @@
 import {inject} from '@loopback/core';
-import {
-  post,
-  requestBody,
-  response,
-} from '@loopback/rest';
+import {post, requestBody, response} from '@loopback/rest';
 import {Device} from '../models';
-import {DeviceRepository} from '../repositories';
+import {DeviceService} from '../services';
 
 export class DeviceController {
   constructor(
-    @inject('repositories.DeviceRepository')
-    private deviceRepository: DeviceRepository,
+    @inject('services.DeviceService')
+    private deviceService: DeviceService,
   ) {}
 
   @post('/devices')
   @response(200, {
-    description: 'Device model instance',
+    description: 'Create device and generate screenshots',
     content: {
       'application/json': {
-        schema: {
-          'x-ts-type': Device,
-        },
+        schema: {type: 'object'},
       },
     },
   })
@@ -42,7 +36,7 @@ export class DeviceController {
       },
     })
     device: Omit<Device, 'id'>,
-  ): Promise<Device> {
-    return this.deviceRepository.create(device);
+  ): Promise<any> {
+    return this.deviceService.createDevice(device);
   }
 }
