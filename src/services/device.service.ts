@@ -4,6 +4,7 @@ import {Device} from '../models';
 import puppeteer, {Page} from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
+import {HttpErrors} from '@loopback/rest';
 
 @injectable({scope: BindingScope.TRANSIENT})
 export class DeviceService {
@@ -13,19 +14,19 @@ export class DeviceService {
   ) {}
 
   async createDevice(device: Omit<Device, 'id'>): Promise<Device> {
-  const created = await this.deviceRepository.create(device);
-  const screenshots = await this.takeScreenshot(
-    device.url,
-    device.deviceResolution,
-    device.deviceId,
-    device.deviceName,
-  );
-  await this.deviceRepository.updateById(created.id, {
-    screenshots,
-  });
-  const updatedDevice = await this.deviceRepository.findById(created.id);
-  return updatedDevice;
-}
+    const created = await this.deviceRepository.create(device);
+    const screenshots = await this.takeScreenshot(
+      device.url,
+      device.deviceResolution,
+      device.deviceId,
+      device.deviceName,
+    );
+    await this.deviceRepository.updateById(created.id, {
+      screenshots,
+    });
+    const updatedDevice = await this.deviceRepository.findById(created.id);
+    return updatedDevice;
+  }
 
   private sleep(ms: number): Promise<void> {
     return new Promise(res => setTimeout(res, ms));
@@ -96,10 +97,7 @@ export class DeviceService {
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
-    const file1 = path.join(
-      dir,
-      `${deviceId}_${safeName}_1.png`,
-    );
+    const file1 = path.join(dir, `${deviceId}_${safeName}_1.png`);
 
     await page.screenshot({
       path: file1,
@@ -113,10 +111,7 @@ export class DeviceService {
       window.scrollTo(0, document.body.scrollHeight);
     });
 
-    const file2 = path.join(
-      dir,
-      `${deviceId}_${safeName}_2.png`,
-    );
+    const file2 = path.join(dir, `${deviceId}_${safeName}_2.png`);
 
     await page.screenshot({
       path: file2,
@@ -131,19 +126,51 @@ export class DeviceService {
   }
 
   async getAllDevices(): Promise<Device[]> {
-  return this.deviceRepository.find();
-}
-
-async getDeviceByDeviceId(deviceId: string): Promise<Device> {
-  const device = await this.deviceRepository.findOne({
-    where: {deviceId},
-  });
-
-  if (!device) {
-    throw new Error(`Device with deviceId ${deviceId} not found`);
+    return this.deviceRepository.find();
   }
 
-  return device;
-}
+  async getDeviceByDeviceId(deviceId: string): Promise<Device> {
+    const device = await this.deviceRepository.findOne({
+      where: {deviceId},
+    });
 
+    if (!device) {
+      throw new Error(`Device with deviceId ${deviceId} not found`);
+    }
+
+    return device;
+  }
+
+  async syncDevice(deviceId: string): Promise<Device> {
+    const device = await this.deviceRepository.findOne({
+      where: {deviceId},
+    });
+
+    if (!device) {
+      throw new HttpErrors.NotFound(
+        `Device with deviceId ${deviceId} not found`,
+      );
+    }
+
+    if (device.screenshots && device.screenshots.length) {
+      for (const file of device.screenshots) {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+        }
+      }
+    }
+
+    const screenshots = await this.takeScreenshot(
+      device.url,
+      device.deviceResolution,
+      device.deviceId,
+      device.deviceName,
+    );
+
+    await this.deviceRepository.updateById(device.id, {
+      screenshots,
+    });
+
+    return this.deviceRepository.findById(device.id);
+  }
 }

@@ -1,5 +1,12 @@
 import {inject} from '@loopback/core';
-import {get, param, post, requestBody, response, RestBindings} from '@loopback/rest';
+import {
+  get,
+  param,
+  post,
+  requestBody,
+  response,
+  RestBindings,
+} from '@loopback/rest';
 import {Device} from '../models';
 import {DeviceService} from '../services';
 import {authenticate} from '@loopback/authentication';
@@ -46,7 +53,6 @@ export class DeviceController {
     return this.deviceService.createDevice(device);
   }
 
-
   @get('/devices')
   @response(200, {
     description: 'Get all devices',
@@ -78,4 +84,18 @@ export class DeviceController {
     return this.deviceService.getDeviceByDeviceId(deviceId);
   }
 
+  @post('/devices/sync/{deviceId}')
+  @response(200, {
+    description: 'Sync device and regenerate screenshots',
+    content: {
+      'application/json': {
+        schema: {'x-ts-type': Device},
+      },
+    },
+  })
+  async syncDevice(
+    @param.path.string('deviceId') deviceId: string,
+  ): Promise<Device> {
+    return this.deviceService.syncDevice(deviceId);
+  }
 }
