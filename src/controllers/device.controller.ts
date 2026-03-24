@@ -1,5 +1,5 @@
 import {inject} from '@loopback/core';
-import {get, param, post, requestBody, response} from '@loopback/rest';
+import {del, get, param, patch, post, requestBody, response} from '@loopback/rest';
 import {Device} from '../models';
 import {DeviceService} from '../services';
 import {authenticate} from '@loopback/authentication';
@@ -103,5 +103,45 @@ export class DeviceController {
   })
   async syncAll(): Promise<Device[]> {
     return this.deviceService.syncAllDevices();
+  }
+
+  @patch('/devices/{deviceId}')
+  @response(200, {
+    description: 'Update device fields (partial)',
+    content: {
+      'application/json': {
+        schema: {'x-ts-type': Device},
+      },
+    },
+  })
+  async updateDevice(
+    @param.path.string('deviceId') deviceId: string,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            properties: {
+              deviceName: {type: 'string'},
+              deviceResolution: {type: 'string'},
+              url: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    devicePatch: Partial<Omit<Device, 'id' | 'deviceId' | 'screenshots' | 'lastUpdated'>>,
+  ): Promise<Device> {
+    return this.deviceService.updateDevice(deviceId, devicePatch);
+  }
+
+  @del('/devices/{deviceId}')
+  @response(204, {
+    description: 'Device deleted successfully',
+  })
+  async deleteDevice(
+    @param.path.string('deviceId') deviceId: string,
+  ): Promise<void> {
+    return this.deviceService.deleteDevice(deviceId);
   }
 }

@@ -200,4 +200,64 @@ export class DeviceService {
 
     return updatedDevices;
   }
+
+  async updateDevice(
+    deviceId: string,
+    devicePatch: Partial<Omit<Device, 'id' | 'deviceId' | 'screenshots' | 'lastUpdated'>>,
+  ): Promise<Device> {
+    const existing = await this.deviceRepository.findById(deviceId);
+    if (!existing) {
+      throw new HttpErrors.NotFound(`Device with deviceId ${deviceId} not found`);
+    }
+
+    const now = new Date().toISOString();
+
+    const resolutionChanged =
+      devicePatch.deviceResolution !== undefined &&
+      devicePatch.deviceResolution !== existing.deviceResolution;
+    const urlChanged =
+      devicePatch.url !== undefined && devicePatch.url !== existing.url;
+
+    await this.deviceRepository.updateById(deviceId, {
+      ...devicePatch,
+      lastUpdated: now,
+    });
+
+    if (urlChanged || resolutionChanged) {
+      if (existing.screenshots && existing.screenshots.length) {
+        for (const file of existing.screenshots) {
+          if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+          }
+        }
+      }
+      const updatedDevice = await this.deviceRepository.findById(deviceId);
+      const screenshots = await this.takeScreenshot(
+        updatedDevice.url,
+        updatedDevice.deviceResolution,
+        updatedDevice.deviceId,
+        updatedDevice.deviceName,
+      );
+      await this.deviceRepository.updateById(deviceId, {screenshots, lastUpdated: now});
+    }
+
+    return this.deviceRepository.findById(deviceId);
+  }
+
+  async deleteDevice(deviceId: string): Promise<void> {
+    const device = await this.deviceRepository.findById(deviceId);
+    if (!device) {
+      throw new HttpErrors.NotFound(`Device with deviceId ${deviceId} not found`);
+    }
+
+    if (device.screenshots && device.screenshots.length) {
+      for (const file of device.screenshots) {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+        }
+      }
+    }
+
+    await this.deviceRepository.deleteById(deviceId);
+  }
 }
