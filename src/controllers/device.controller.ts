@@ -1,11 +1,5 @@
 import {inject} from '@loopback/core';
-import {
-  get,
-  param,
-  post,
-  requestBody,
-  response,
-} from '@loopback/rest';
+import {get, param, post, requestBody, response} from '@loopback/rest';
 import {Device} from '../models';
 import {DeviceService} from '../services';
 import {authenticate} from '@loopback/authentication';
@@ -93,5 +87,21 @@ export class DeviceController {
     @param.path.string('deviceId') deviceId: string,
   ): Promise<Device> {
     return this.deviceService.syncDevice(deviceId);
+  }
+
+  @post('/devices/sync-all')
+  @response(200, {
+    description: 'Sync all devices and regenerate screenshots',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'array',
+          items: {'x-ts-type': Device},
+        },
+      },
+    },
+  })
+  async syncAll(): Promise<Device[]> {
+    return this.deviceService.syncAllDevices();
   }
 }

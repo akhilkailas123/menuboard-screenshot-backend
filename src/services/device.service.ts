@@ -165,4 +165,43 @@ export class DeviceService {
 
     return this.deviceRepository.findById(device.id);
   }
+
+  async syncAllDevices(): Promise<Device[]> {
+    const devices = await this.deviceRepository.find();
+
+    const updatedDevices: Device[] = [];
+
+    for (const device of devices) {
+      try {
+        if (device.screenshots && device.screenshots.length) {
+          for (const file of device.screenshots) {
+            if (fs.existsSync(file)) {
+              fs.unlinkSync(file);
+            }
+          }
+        }
+
+        const screenshots = await this.takeScreenshot(
+          device.url,
+          device.deviceResolution,
+          device.deviceId,
+          device.deviceName,
+        );
+
+        const now = new Date().toISOString();
+
+        await this.deviceRepository.updateById(device.id, {
+          screenshots,
+          lastUpdated: now,
+        });
+
+        const updated = await this.deviceRepository.findById(device.id);
+        updatedDevices.push(updated);
+      } catch (err) {
+        console.error(`Failed syncing device ${device.deviceId}`, err);
+      }
+    }
+
+    return updatedDevices;
+  }
 }
