@@ -46,19 +46,14 @@ export class DeviceService {
     });
 
     try {
-      await page.waitForFunction(
-        () => {
-          const loaders = document.querySelectorAll(
-            '.loading, .loader, .spinner',
-          );
-          return loaders.length === 0;
-        },
-        {timeout: 10000},
-      );
-    } catch {
-      console.log('No loader detected or timeout reached');
+      await page.waitForSelector('.loading', {timeout: 10000});
+      await page.waitForFunction(() => !document.querySelector('.loading'), {
+        timeout: 30000,
+      });
+      console.log('Loader disappeared, page fully loaded');
+    } catch (err) {
+      console.log('Loader not found or timeout, continuing...');
     }
-
     await this.sleep(2000);
   }
 
@@ -79,15 +74,16 @@ export class DeviceService {
     page.setDefaultNavigationTimeout(60000);
 
     await page.goto(url, {waitUntil: 'domcontentloaded'});
+
     await this.waitForFullLoad(page);
 
     await page.addStyleTag({
       content: `
-        * {
-          animation: none !important;
-          transition: none !important;
-        }
-      `,
+      * {
+        animation: none !important;
+        transition: none !important;
+      }
+    `,
     });
 
     const dir = 'screenshots';
@@ -97,32 +93,17 @@ export class DeviceService {
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
-    const file1 = path.join(dir, `${deviceId}_${safeName}_1.png`);
+
+    const filePath = path.join(dir, `${deviceId}_${safeName}.png`);
 
     await page.screenshot({
-      path: file1,
+      path: filePath,
       fullPage: true,
     });
 
-    console.log('Saved first screenshot:', file1);
-    await this.sleep(15000);
-
-    await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
-
-    const file2 = path.join(dir, `${deviceId}_${safeName}_2.png`);
-
-    await page.screenshot({
-      path: file2,
-      fullPage: true,
-    });
-
-    console.log('Saved second screenshot:', file2);
-
+    console.log('Saved screenshot:', filePath);
     await browser.close();
-
-    return [file1, file2];
+    return [filePath];
   }
 
   async getAllDevices(): Promise<Device[]> {
