@@ -5,19 +5,15 @@ import {
   post,
   requestBody,
   response,
-  RestBindings,
 } from '@loopback/rest';
 import {Device} from '../models';
 import {DeviceService} from '../services';
 import {authenticate} from '@loopback/authentication';
 import {AUTHENTICATION_STRATEGY} from '../util/constants';
-// import {SecurityBindings, UserProfile} from '@loopback/security';
 
 @authenticate(AUTHENTICATION_STRATEGY)
 export class DeviceController {
   constructor(
-    // @inject(SecurityBindings.USER) private userProfile: UserProfile,
-    // @inject(RestBindings.Http.REQUEST)
     @inject('services.DeviceService')
     private deviceService: DeviceService,
   ) {}

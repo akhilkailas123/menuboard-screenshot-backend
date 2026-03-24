@@ -8,25 +8,14 @@ import {
   Strategy as JwtStrategy,
   VerifiedCallback,
 } from 'passport-jwt';
-import { Auth0JwtPayload } from './auth0-payload';
-import { AUTHENTICATION_STRATEGY } from '../util/constants';
+import {Auth0JwtPayload} from './auth0-payload';
+import {AUTHENTICATION_STRATEGY} from '../util/constants';
+
 export class Auth0Strategy implements AuthenticationStrategy {
   name = AUTHENTICATION_STRATEGY;
 
   async authenticate(request: Request): Promise<UserProfile> {
     return new Promise((resolve, reject) => {
-      const apiKey = request.query['api_key'];
-      const secretApi = process.env.CUSTOM_API_KEY ?? 'test';
-      if (apiKey && apiKey === secretApi) {
-        const user: UserProfile = {
-          [securityId]: 'api_key_user',
-          name: 'Spectrio API Key User',
-          email: 'api-key-user@spectrio.com',
-        };
-        resolve(user);
-        return;
-      }
-
       const strategy = new JwtStrategy(
         {
           secretOrKeyProvider: jwksRsa.passportJwtSecret({
@@ -49,6 +38,7 @@ export class Auth0Strategy implements AuthenticationStrategy {
               false,
             );
           }
+
           const {organizations = []} = payload;
           const expectedOrgId = process.env.IR_ACCOUNT_ID;
 
@@ -64,11 +54,13 @@ export class Auth0Strategy implements AuthenticationStrategy {
               false,
             );
           }
+
           const user: UserProfile = {
             [securityId]: payload.sub,
             name: payload.name,
             email: payload.email,
           };
+
           done(null, user);
         },
       );
