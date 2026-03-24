@@ -14,18 +14,26 @@ export class DeviceService {
   ) {}
 
   async createDevice(device: Omit<Device, 'id'>): Promise<Device> {
-    const created = await this.deviceRepository.create(device);
+    const now = new Date().toISOString();
+
+    const created = await this.deviceRepository.create({
+      ...device,
+      lastUpdated: now,
+    });
+
     const screenshots = await this.takeScreenshot(
       device.url,
       device.deviceResolution,
       device.deviceId,
       device.deviceName,
     );
+
     await this.deviceRepository.updateById(created.id, {
       screenshots,
+      lastUpdated: now,
     });
-    const updatedDevice = await this.deviceRepository.findById(created.id);
-    return updatedDevice;
+
+    return this.deviceRepository.findById(created.id);
   }
 
   private sleep(ms: number): Promise<void> {
@@ -148,8 +156,11 @@ export class DeviceService {
       device.deviceName,
     );
 
+    const now = new Date().toISOString();
+
     await this.deviceRepository.updateById(device.id, {
       screenshots,
+      lastUpdated: now,
     });
 
     return this.deviceRepository.findById(device.id);

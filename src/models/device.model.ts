@@ -39,6 +39,11 @@ export class Device extends Entity {
   })
   screenshots?: string[];
 
+  @property({
+    type: 'date',
+  })
+  lastUpdated?: string;
+
   constructor(data?: Partial<Device>) {
     super(data);
   }
