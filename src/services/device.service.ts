@@ -13,7 +13,7 @@ export class DeviceService {
     private deviceRepository: DeviceRepository,
   ) {}
 
-  async createDevice(device: Omit<Device, 'id'>): Promise<Device> {
+  async createDevice(device: Device): Promise<Device> {
     const now = new Date().toISOString();
 
     const created = await this.deviceRepository.create({
@@ -28,12 +28,12 @@ export class DeviceService {
       device.deviceName,
     );
 
-    await this.deviceRepository.updateById(created.id, {
+    await this.deviceRepository.updateById(device.deviceId, {
       screenshots,
       lastUpdated: now,
     });
 
-    return this.deviceRepository.findById(created.id);
+    return this.deviceRepository.findById(device.deviceId);
   }
 
   private sleep(ms: number): Promise<void> {
@@ -119,9 +119,7 @@ export class DeviceService {
   }
 
   async getDeviceByDeviceId(deviceId: string): Promise<Device> {
-    const device = await this.deviceRepository.findOne({
-      where: {deviceId},
-    });
+    const device = await this.deviceRepository.findById(deviceId);
 
     if (!device) {
       throw new Error(`Device with deviceId ${deviceId} not found`);
@@ -131,9 +129,7 @@ export class DeviceService {
   }
 
   async syncDevice(deviceId: string): Promise<Device> {
-    const device = await this.deviceRepository.findOne({
-      where: {deviceId},
-    });
+    const device = await this.deviceRepository.findById(deviceId);
 
     if (!device) {
       throw new HttpErrors.NotFound(
@@ -158,12 +154,12 @@ export class DeviceService {
 
     const now = new Date().toISOString();
 
-    await this.deviceRepository.updateById(device.id, {
+    await this.deviceRepository.updateById(device.deviceId, {
       screenshots,
       lastUpdated: now,
     });
 
-    return this.deviceRepository.findById(device.id);
+    return this.deviceRepository.findById(device.deviceId);
   }
 
   async syncAllDevices(): Promise<Device[]> {
@@ -190,12 +186,12 @@ export class DeviceService {
 
         const now = new Date().toISOString();
 
-        await this.deviceRepository.updateById(device.id, {
+        await this.deviceRepository.updateById(device.deviceId, {
           screenshots,
           lastUpdated: now,
         });
 
-        const updated = await this.deviceRepository.findById(device.id);
+        const updated = await this.deviceRepository.findById(device.deviceId);
         updatedDevices.push(updated);
       } catch (err) {
         console.error(`Failed syncing device ${device.deviceId}`, err);

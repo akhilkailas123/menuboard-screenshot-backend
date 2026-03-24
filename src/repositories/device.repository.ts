@@ -5,7 +5,7 @@ import {Device, DeviceRelations} from '../models';
 
 export class DeviceRepository extends DefaultCrudRepository<
   Device,
-  typeof Device.prototype.id,
+  typeof Device.prototype.deviceId,
   DeviceRelations
 > {
   constructor(
