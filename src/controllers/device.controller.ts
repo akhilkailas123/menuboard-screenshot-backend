@@ -5,7 +5,7 @@ import {DeviceService} from '../services';
 import {authenticate} from '@loopback/authentication';
 import {AUTHENTICATION_STRATEGY} from '../util/constants';
 
-@authenticate(AUTHENTICATION_STRATEGY)
+// @authenticate(AUTHENTICATION_STRATEGY)
 export class DeviceController {
   constructor(
     @inject('services.DeviceService')
@@ -27,20 +27,48 @@ export class DeviceController {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['deviceId', 'deviceName', 'deviceResolution', 'url'],
+            required: [
+              'accountId',
+              'deviceEDUID',
+              'contentUrl',
+              'displayGroupId',
+              'accountName',
+              'deviceName',
+              'displayGroup',
+              'macAddress',
+              'syncInterval',
+              'imageFormat',
+              'resolution',
+            ],
             properties: {
-              deviceId: {type: 'string'},
+              accountId: {type: 'string'},
+              deviceEDUID: {type: 'string'},
+              contentUrl: {type: 'string'},
+              displayGroupId: {type: 'string'},
+              accountName: {type: 'string'},
               deviceName: {type: 'string'},
-              deviceResolution: {type: 'string'},
-              url: {type: 'string'},
+              displayGroup: {type: 'string'},
+              macAddress: {type: 'string'},
+              syncInterval: {
+                type: 'string',
+                enum: ['30s', '1m', '5m', '10m', '30m', '1h'],
+              },
+              imageFormat: {
+                type: 'string',
+                enum: ['png', 'jpg'],
+              },
+              resolution: {
+                type: 'string',
+                enum: ['1080p', '4k'],
+              },
             },
           },
         },
       },
     })
-    device: Omit<Device, 'id'>,
+    device: Omit<Device, 'screenshots' | 'lastSync' | 'status'>,
   ): Promise<Device> {
-    return this.deviceService.createDevice(device);
+    return this.deviceService.createDevice(device as Device);
   }
 
   @get('/devices')
@@ -59,22 +87,22 @@ export class DeviceController {
     return this.deviceService.getAllDevices();
   }
 
-  @get('/devices/{deviceId}')
+  @get('/devices/{accountId}')
   @response(200, {
-    description: 'Get device by deviceId',
+    description: 'Get device by accountId',
     content: {
       'application/json': {
         schema: {'x-ts-type': Device},
       },
     },
   })
-  async findByDeviceId(
-    @param.path.string('deviceId') deviceId: string,
+  async findByAccountId(
+    @param.path.string('accountId') accountId: string,
   ): Promise<Device> {
-    return this.deviceService.getDeviceByDeviceId(deviceId);
+    return this.deviceService.getDeviceByAccountId(accountId);
   }
 
-  @post('/devices/sync/{deviceId}')
+  @post('/devices/sync/{accountId}')
   @response(200, {
     description: 'Sync device and regenerate screenshots',
     content: {
@@ -84,9 +112,9 @@ export class DeviceController {
     },
   })
   async syncDevice(
-    @param.path.string('deviceId') deviceId: string,
+    @param.path.string('accountId') accountId: string,
   ): Promise<Device> {
-    return this.deviceService.syncDevice(deviceId);
+    return this.deviceService.syncDevice(accountId);
   }
 
   @post('/devices/sync-all')
@@ -105,7 +133,7 @@ export class DeviceController {
     return this.deviceService.syncAllDevices();
   }
 
-  @patch('/devices/{deviceId}')
+  @patch('/devices/{accountId}')
   @response(200, {
     description: 'Update device fields (partial)',
     content: {
@@ -115,33 +143,51 @@ export class DeviceController {
     },
   })
   async updateDevice(
-    @param.path.string('deviceId') deviceId: string,
+    @param.path.string('accountId') accountId: string,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
             properties: {
+              deviceEDUID: {type: 'string'},
+              contentUrl: {type: 'string'},
+              displayGroupId: {type: 'string'},
+              accountName: {type: 'string'},
               deviceName: {type: 'string'},
-              deviceResolution: {type: 'string'},
-              url: {type: 'string'},
+              displayGroup: {type: 'string'},
+              macAddress: {type: 'string'},
+              syncInterval: {
+                type: 'string',
+                enum: ['30s', '1m', '5m', '10m', '30m', '1h'],
+              },
+              imageFormat: {
+                type: 'string',
+                enum: ['png', 'jpg'],
+              },
+              resolution: {
+                type: 'string',
+                enum: ['1080p', '4k'],
+              },
             },
           },
         },
       },
     })
-    devicePatch: Partial<Omit<Device, 'id' | 'deviceId' | 'screenshots' | 'lastUpdated'>>,
+    devicePatch: Partial<
+      Omit<Device, 'accountId' | 'screenshots' | 'lastSync' | 'status'>
+    >,
   ): Promise<Device> {
-    return this.deviceService.updateDevice(deviceId, devicePatch);
+    return this.deviceService.updateDevice(accountId, devicePatch);
   }
 
-  @del('/devices/{deviceId}')
+  @del('/devices/{accountId}')
   @response(204, {
     description: 'Device deleted successfully',
   })
   async deleteDevice(
-    @param.path.string('deviceId') deviceId: string,
+    @param.path.string('accountId') accountId: string,
   ): Promise<void> {
-    return this.deviceService.deleteDevice(deviceId);
+    return this.deviceService.deleteDevice(accountId);
   }
 }
