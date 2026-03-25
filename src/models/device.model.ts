@@ -1,5 +1,10 @@
 import {Entity, model, property} from '@loopback/repository';
 
+export type Resolution = '1080p' | '4k';
+export type ImageFormat = 'png' | 'jpg';
+export type SyncInterval = '30s' | '1m' | '5m' | '10m' | '30m' | '1h';
+export type DeviceStatus = 'active' | 'syncing' | 'error';
+
 @model()
 export class Device extends Entity {
   @property({
@@ -7,7 +12,31 @@ export class Device extends Entity {
     id: true,
     required: true,
   })
-  deviceId: string;
+  accountId: string;
+
+  @property({
+    type: 'string',
+    required: true,
+  })
+  deviceEDUID: string;
+
+  @property({
+    type: 'string',
+    required: true,
+  })
+  contentUrl: string;
+
+  @property({
+    type: 'string',
+    required: true,
+  })
+  displayGroupId: string;
+
+  @property({
+    type: 'string',
+    required: true,
+  })
+  accountName: string;
 
   @property({
     type: 'string',
@@ -19,13 +48,49 @@ export class Device extends Entity {
     type: 'string',
     required: true,
   })
-  deviceResolution: string;
+  displayGroup: string;
 
   @property({
     type: 'string',
     required: true,
   })
-  url: string;
+  macAddress: string;
+
+  @property({
+    type: 'string',
+    required: true,
+    jsonSchema: {
+      enum: ['30s', '1m', '5m', '10m', '30m', '1h'],
+    },
+  })
+  syncInterval: SyncInterval;
+
+  @property({
+    type: 'string',
+    required: true,
+    jsonSchema: {
+      enum: ['png', 'jpg'],
+    },
+  })
+  imageFormat: ImageFormat;
+
+  @property({
+    type: 'string',
+    required: true,
+    jsonSchema: {
+      enum: ['1080p', '4k'],
+    },
+  })
+  resolution: Resolution;
+
+  @property({
+    type: 'string',
+    default: 'active',
+    jsonSchema: {
+      enum: ['active', 'syncing', 'error'],
+    },
+  })
+  status?: DeviceStatus;
 
   @property({
     type: 'array',
@@ -36,7 +101,7 @@ export class Device extends Entity {
   @property({
     type: 'date',
   })
-  lastUpdated?: string;
+  lastSync?: string;
 
   constructor(data?: Partial<Device>) {
     super(data);

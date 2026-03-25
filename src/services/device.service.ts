@@ -1,10 +1,15 @@
 import {inject, injectable, BindingScope} from '@loopback/core';
 import {DeviceRepository} from '../repositories';
-import {Device} from '../models';
+import {Device, ImageFormat, Resolution} from '../models';
 import puppeteer, {Page} from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
 import {HttpErrors} from '@loopback/rest';
+
+const RESOLUTION_MAP: Record<Resolution, {width: number; height: number}> = {
+  '1080p': {width: 1920, height: 1080},
+  '4k': {width: 3840, height: 2160},
+};
 
 @injectable({scope: BindingScope.TRANSIENT})
 export class DeviceService {
@@ -18,22 +23,33 @@ export class DeviceService {
 
     const created = await this.deviceRepository.create({
       ...device,
-      lastUpdated: now,
+      status: 'syncing',
+      lastSync: now,
     });
 
-    const screenshots = await this.takeScreenshot(
-      device.url,
-      device.deviceResolution,
-      device.deviceId,
-      device.deviceName,
-    );
+    try {
+      const screenshots = await this.takeScreenshot(
+        device.contentUrl,
+        device.resolution,
+        device.accountId,
+        device.deviceName,
+        device.imageFormat,
+      );
 
-    await this.deviceRepository.updateById(device.deviceId, {
-      screenshots,
-      lastUpdated: now,
-    });
+      await this.deviceRepository.updateById(device.accountId, {
+        screenshots,
+        status: 'active',
+        lastSync: now,
+      });
+    } catch (err) {
+      await this.deviceRepository.updateById(device.accountId, {
+        status: 'error',
+        lastSync: now,
+      });
+      throw err;
+    }
 
-    return this.deviceRepository.findById(device.deviceId);
+    return this.deviceRepository.findById(device.accountId);
   }
 
   private sleep(ms: number): Promise<void> {
@@ -42,7 +58,7 @@ export class DeviceService {
 
   private ensureDir(dir: string): void {
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir);
+      fs.mkdirSync(dir, {recursive: true});
     }
   }
 
@@ -66,12 +82,13 @@ export class DeviceService {
   }
 
   private async takeScreenshot(
-    url: string,
-    resolution: string,
-    deviceId: string,
+    contentUrl: string,
+    resolution: Resolution,
+    accountId: string,
     deviceName: string,
+    imageFormat: ImageFormat,
   ): Promise<string[]> {
-    const [width, height] = resolution.split('x').map(Number);
+    const {width, height} = RESOLUTION_MAP[resolution];
 
     const browser = await puppeteer.launch({
       headless: true,
@@ -81,7 +98,7 @@ export class DeviceService {
     const page: Page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
 
-    await page.goto(url, {waitUntil: 'domcontentloaded'});
+    await page.goto(contentUrl, {waitUntil: 'domcontentloaded'});
 
     await this.waitForFullLoad(page);
 
@@ -94,19 +111,22 @@ export class DeviceService {
     `,
     });
 
-    const dir = 'screenshots';
+    const dir = path.resolve(process.cwd(), 'screenshots');
     this.ensureDir(dir);
 
     const safeName = deviceName.replace(/\s+/g, '_');
+
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
 
-    const filePath = path.join(dir, `${deviceId}_${safeName}.png`);
+    const ext = imageFormat === 'jpg' ? 'jpeg' : 'png';
+    const filePath = path.join(dir, `${accountId}_${safeName}.${imageFormat}`);
 
     await page.screenshot({
       path: filePath,
       fullPage: true,
+      type: ext as 'png' | 'jpeg',
     });
 
     console.log('Saved screenshot:', filePath);
@@ -118,57 +138,65 @@ export class DeviceService {
     return this.deviceRepository.find();
   }
 
-  async getDeviceByDeviceId(deviceId: string): Promise<Device> {
-    const device = await this.deviceRepository.findById(deviceId);
+  async getDeviceByAccountId(accountId: string): Promise<Device> {
+    const device = await this.deviceRepository.findById(accountId);
 
     if (!device) {
-      throw new Error(`Device with deviceId ${deviceId} not found`);
+      throw new HttpErrors.NotFound(`Device with accountId ${accountId} not found`);
     }
 
     return device;
   }
 
-  async syncDevice(deviceId: string): Promise<Device> {
-    const device = await this.deviceRepository.findById(deviceId);
+  async syncDevice(accountId: string): Promise<Device> {
+    const device = await this.deviceRepository.findById(accountId);
 
     if (!device) {
-      throw new HttpErrors.NotFound(
-        `Device with deviceId ${deviceId} not found`,
-      );
+      throw new HttpErrors.NotFound(`Device with accountId ${accountId} not found`);
     }
 
-    if (device.screenshots && device.screenshots.length) {
-      for (const file of device.screenshots) {
-        if (fs.existsSync(file)) {
-          fs.unlinkSync(file);
+    await this.deviceRepository.updateById(accountId, {status: 'syncing'});
+
+    try {
+      if (device.screenshots && device.screenshots.length) {
+        for (const file of device.screenshots) {
+          if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+          }
         }
       }
+
+      const screenshots = await this.takeScreenshot(
+        device.contentUrl,
+        device.resolution,
+        device.accountId,
+        device.deviceName,
+        device.imageFormat,
+      );
+
+      const now = new Date().toISOString();
+
+      await this.deviceRepository.updateById(device.accountId, {
+        screenshots,
+        status: 'active',
+        lastSync: now,
+      });
+    } catch (err) {
+      await this.deviceRepository.updateById(accountId, {status: 'error'});
+      throw err;
     }
 
-    const screenshots = await this.takeScreenshot(
-      device.url,
-      device.deviceResolution,
-      device.deviceId,
-      device.deviceName,
-    );
-
-    const now = new Date().toISOString();
-
-    await this.deviceRepository.updateById(device.deviceId, {
-      screenshots,
-      lastUpdated: now,
-    });
-
-    return this.deviceRepository.findById(device.deviceId);
+    return this.deviceRepository.findById(device.accountId);
   }
 
   async syncAllDevices(): Promise<Device[]> {
     const devices = await this.deviceRepository.find();
-
     const updatedDevices: Device[] = [];
 
     for (const device of devices) {
       try {
+        await this.deviceRepository.updateById(device.accountId, {status: 'syncing'});
+
         if (device.screenshots && device.screenshots.length) {
           for (const file of device.screenshots) {
             if (fs.existsSync(file)) {
@@ -178,23 +206,26 @@ export class DeviceService {
         }
 
         const screenshots = await this.takeScreenshot(
-          device.url,
-          device.deviceResolution,
-          device.deviceId,
+          device.contentUrl,
+          device.resolution,
+          device.accountId,
           device.deviceName,
+          device.imageFormat,
         );
 
         const now = new Date().toISOString();
 
-        await this.deviceRepository.updateById(device.deviceId, {
+        await this.deviceRepository.updateById(device.accountId, {
           screenshots,
-          lastUpdated: now,
+          status: 'active',
+          lastSync: now,
         });
 
-        const updated = await this.deviceRepository.findById(device.deviceId);
+        const updated = await this.deviceRepository.findById(device.accountId);
         updatedDevices.push(updated);
       } catch (err) {
-        console.error(`Failed syncing device ${device.deviceId}`, err);
+        console.error(`Failed syncing device ${device.accountId}`, err);
+        await this.deviceRepository.updateById(device.accountId, {status: 'error'});
       }
     }
 
@@ -202,52 +233,73 @@ export class DeviceService {
   }
 
   async updateDevice(
-    deviceId: string,
-    devicePatch: Partial<Omit<Device, 'id' | 'deviceId' | 'screenshots' | 'lastUpdated'>>,
+    accountId: string,
+    devicePatch: Partial<
+      Omit<Device, 'accountId' | 'screenshots' | 'lastSync' | 'status'>
+    >,
   ): Promise<Device> {
-    const existing = await this.deviceRepository.findById(deviceId);
+    const existing = await this.deviceRepository.findById(accountId);
     if (!existing) {
-      throw new HttpErrors.NotFound(`Device with deviceId ${deviceId} not found`);
+      throw new HttpErrors.NotFound(`Device with accountId ${accountId} not found`);
     }
 
     const now = new Date().toISOString();
 
     const resolutionChanged =
-      devicePatch.deviceResolution !== undefined &&
-      devicePatch.deviceResolution !== existing.deviceResolution;
+      devicePatch.resolution !== undefined &&
+      devicePatch.resolution !== existing.resolution;
     const urlChanged =
-      devicePatch.url !== undefined && devicePatch.url !== existing.url;
+      devicePatch.contentUrl !== undefined &&
+      devicePatch.contentUrl !== existing.contentUrl;
+    const formatChanged =
+      devicePatch.imageFormat !== undefined &&
+      devicePatch.imageFormat !== existing.imageFormat;
 
-    await this.deviceRepository.updateById(deviceId, {
+    await this.deviceRepository.updateById(accountId, {
       ...devicePatch,
-      lastUpdated: now,
+      lastSync: now,
     });
 
-    if (urlChanged || resolutionChanged) {
-      if (existing.screenshots && existing.screenshots.length) {
-        for (const file of existing.screenshots) {
-          if (fs.existsSync(file)) {
-            fs.unlinkSync(file);
+    if (urlChanged || resolutionChanged || formatChanged) {
+      await this.deviceRepository.updateById(accountId, {status: 'syncing'});
+
+      try {
+        if (existing.screenshots && existing.screenshots.length) {
+          for (const file of existing.screenshots) {
+            if (fs.existsSync(file)) {
+              fs.unlinkSync(file);
+            }
           }
         }
+
+        const updatedDevice = await this.deviceRepository.findById(accountId);
+
+        const screenshots = await this.takeScreenshot(
+          updatedDevice.contentUrl,
+          updatedDevice.resolution,
+          updatedDevice.accountId,
+          updatedDevice.deviceName,
+          updatedDevice.imageFormat,
+        );
+
+        await this.deviceRepository.updateById(accountId, {
+          screenshots,
+          status: 'active',
+          lastSync: now,
+        });
+      } catch (err) {
+        await this.deviceRepository.updateById(accountId, {status: 'error'});
+        throw err;
       }
-      const updatedDevice = await this.deviceRepository.findById(deviceId);
-      const screenshots = await this.takeScreenshot(
-        updatedDevice.url,
-        updatedDevice.deviceResolution,
-        updatedDevice.deviceId,
-        updatedDevice.deviceName,
-      );
-      await this.deviceRepository.updateById(deviceId, {screenshots, lastUpdated: now});
     }
 
-    return this.deviceRepository.findById(deviceId);
+    return this.deviceRepository.findById(accountId);
   }
 
-  async deleteDevice(deviceId: string): Promise<void> {
-    const device = await this.deviceRepository.findById(deviceId);
+  async deleteDevice(accountId: string): Promise<void> {
+    const device = await this.deviceRepository.findById(accountId);
     if (!device) {
-      throw new HttpErrors.NotFound(`Device with deviceId ${deviceId} not found`);
+      throw new HttpErrors.NotFound(`Device with accountId ${accountId} not found`);
     }
 
     if (device.screenshots && device.screenshots.length) {
@@ -258,6 +310,6 @@ export class DeviceService {
       }
     }
 
-    await this.deviceRepository.deleteById(deviceId);
+    await this.deviceRepository.deleteById(accountId);
   }
 }
