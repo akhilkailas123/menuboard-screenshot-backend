@@ -20,13 +20,11 @@ export class DeviceService {
 
   async createDevice(device: Device): Promise<Device> {
     const now = new Date().toISOString();
-
     const created = await this.deviceRepository.create({
       ...device,
       status: 'syncing',
       lastSync: now,
     });
-
     try {
       const screenshots = await this.takeScreenshot(
         device.contentUrl,
@@ -35,7 +33,6 @@ export class DeviceService {
         device.deviceName,
         device.imageFormat,
       );
-
       await this.deviceRepository.updateById(device.accountId, {
         screenshots,
         status: 'active',
@@ -48,7 +45,6 @@ export class DeviceService {
       });
       throw err;
     }
-
     return this.deviceRepository.findById(device.accountId);
   }
 
@@ -64,11 +60,9 @@ export class DeviceService {
 
   private async waitForFullLoad(page: Page): Promise<void> {
     await page.waitForSelector('body');
-
     await page.evaluate(async () => {
       await (document as any).fonts.ready;
     });
-
     try {
       await page.waitForSelector('.loading', {timeout: 10000});
       await page.waitForFunction(() => !document.querySelector('.loading'), {
@@ -89,49 +83,151 @@ export class DeviceService {
     imageFormat: ImageFormat,
   ): Promise<string[]> {
     const {width, height} = RESOLUTION_MAP[resolution];
-
     const browser = await puppeteer.launch({
       headless: true,
       defaultViewport: {width, height},
     });
-
     const page: Page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
-
     await page.goto(contentUrl, {waitUntil: 'domcontentloaded'});
-
     await this.waitForFullLoad(page);
-
-    await page.addStyleTag({
-      content: `
-      * {
-        animation: none !important;
-        transition: none !important;
-      }
-    `,
-    });
+    // NOTE: Do NOT inject animation:none globally here — it would freeze the
+    // player's rotation logic and prevent tokens from ever changing.
+    // Animations are frozen only at the instant we take each screenshot,
+    // then immediately restored so the playlist can keep advancing.
 
     const dir = path.resolve(process.cwd(), 'screenshots');
     this.ensureDir(dir);
-
     const safeName = deviceName.replace(/\s+/g, '_');
-
-    await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
-
     const ext = imageFormat === 'jpg' ? 'jpeg' : 'png';
-    const filePath = path.join(dir, `${accountId}_${safeName}.${imageFormat}`);
+    const filePaths: string[] = [];
 
-    await page.screenshot({
-      path: filePath,
-      fullPage: true,
-      type: ext as 'png' | 'jpeg',
-    });
+    // Freeze animations just long enough to take a clean screenshot,
+    // then restore them so the player can continue rotating.
+    const captureStableScreenshot = async (filePath: string): Promise<void> => {
+      // Inject freeze style
+      await page.evaluate(() => {
+        const style = document.createElement('style');
+        style.id = '__screenshot_freeze__';
+        style.textContent = '* { animation-play-state: paused !important; transition: none !important; }';
+        document.head.appendChild(style);
+      });
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.screenshot({
+        path: filePath,
+        fullPage: true,
+        type: ext as 'png' | 'jpeg',
+      });
+      // Remove freeze style so rotation can continue
+      await page.evaluate(() => {
+        const el = document.getElementById('__screenshot_freeze__');
+        if (el) el.remove();
+      });
+    };
 
-    console.log('Saved screenshot:', filePath);
+    // Helper: read both token AND assetid from the current showed-app.
+    // - token  → changes every rotation (always a new UUID, even for same content)
+    // - assetid → stays the same for the same slide content
+    // We use assetid for deduplication and token only to detect a slide change.
+    const getShowedSlide = (): Promise<{token: string; assetId: string} | null> =>
+      page.evaluate(() => {
+        const el = document.querySelector('.player-app.showed-app');
+        if (!el) return null;
+        const token = el.getAttribute('data-apptoken') ?? '';
+        const assetId = el.getAttribute('data-assetid') ?? '';
+        return token ? {token, assetId} : null;
+      });
+
+    // ── Step 1: capture first slide immediately ────────────────────────────
+    const firstSlide = await getShowedSlide();
+    console.log(
+      `[Screenshot] First slide — token: ${firstSlide?.token ?? 'none'}, assetId: ${firstSlide?.assetId ?? 'none (static page)'}`,
+    );
+
+    const firstFilePath = path.join(
+      dir,
+      `${accountId}_${safeName}_slide_1.${imageFormat}`,
+    );
+    await captureStableScreenshot(firstFilePath);
+    console.log('[Screenshot] Saved:', firstFilePath);
+    filePaths.push(firstFilePath);
+
+    // No player tokens → fully static page, nothing more to do
+    if (!firstSlide) {
+      await browser.close();
+      return filePaths;
+    }
+
+    // ── Step 2: poll for new slides, deduplicated by assetId ──────────────
+    // Token changes every rotation even for the same asset, so we MUST use
+    // assetId to know whether content is actually different.
+    const seenAssetIds = new Set<string>([firstSlide.assetId]);
+    const firstAssetId = firstSlide.assetId;
+    let lastSeenToken = firstSlide.token; // track token to detect any change
+
+    const MAX_WAIT_MS = 120_000;    // up to 2 min to observe a full rotation
+    const POLL_INTERVAL_MS = 1_000;
+    const startTime = Date.now();
+
+    console.log('[Screenshot] Watching for slide rotation…');
+
+    while (Date.now() - startTime < MAX_WAIT_MS) {
+      await this.sleep(POLL_INTERVAL_MS);
+
+      const current = await getShowedSlide();
+
+      // Mid-transition — no showed-app visible yet
+      if (!current) continue;
+
+      // Token unchanged → same slide still showing, keep waiting
+      if (current.token === lastSeenToken) continue;
+
+      // Token changed — a new slide has rotated in
+      lastSeenToken = current.token;
+      console.log(
+        `[Screenshot] Slide changed — token: ${current.token}, assetId: ${current.assetId}`,
+      );
+
+      // Cycled back to the first asset → full playlist rotation complete
+      if (current.assetId === firstAssetId && seenAssetIds.size > 1) {
+        console.log('[Screenshot] Full rotation complete (back to first asset), stopping.');
+        break;
+      }
+
+      // New asset we haven't seen yet → capture it
+      if (!seenAssetIds.has(current.assetId)) {
+        seenAssetIds.add(current.assetId);
+        const slideIndex = seenAssetIds.size; // 2, 3, 4 …
+
+        console.log(`[Screenshot] New unique slide #${slideIndex} (assetId: ${current.assetId})`);
+
+        // Wait for the slide iframe content to finish rendering
+        await this.sleep(1500);
+
+        const slideFilePath = path.join(
+          dir,
+          `${accountId}_${safeName}_slide_${slideIndex}.${imageFormat}`,
+        );
+        await captureStableScreenshot(slideFilePath);
+        console.log('[Screenshot] Saved:', slideFilePath);
+        filePaths.push(slideFilePath);
+      } else {
+        console.log(
+          `[Screenshot] Skipping duplicate assetId: ${current.assetId}`,
+        );
+      }
+    }
+
+    if (seenAssetIds.size === 1) {
+      console.log('[Screenshot] No rotation detected — single-slide playlist.');
+    } else {
+      console.log(
+        `[Screenshot] Captured ${filePaths.length} unique slides out of ${seenAssetIds.size} assets.`,
+      );
+    }
+
     await browser.close();
-    return [filePath];
+    return filePaths;
   }
 
   async getAllDevices(): Promise<Device[]> {
@@ -140,23 +236,18 @@ export class DeviceService {
 
   async getDeviceByAccountId(accountId: string): Promise<Device> {
     const device = await this.deviceRepository.findById(accountId);
-
     if (!device) {
       throw new HttpErrors.NotFound(`Device with accountId ${accountId} not found`);
     }
-
     return device;
   }
 
   async syncDevice(accountId: string): Promise<Device> {
     const device = await this.deviceRepository.findById(accountId);
-
     if (!device) {
       throw new HttpErrors.NotFound(`Device with accountId ${accountId} not found`);
     }
-
     await this.deviceRepository.updateById(accountId, {status: 'syncing'});
-
     try {
       if (device.screenshots && device.screenshots.length) {
         for (const file of device.screenshots) {
@@ -165,7 +256,6 @@ export class DeviceService {
           }
         }
       }
-
       const screenshots = await this.takeScreenshot(
         device.contentUrl,
         device.resolution,
@@ -173,9 +263,7 @@ export class DeviceService {
         device.deviceName,
         device.imageFormat,
       );
-
       const now = new Date().toISOString();
-
       await this.deviceRepository.updateById(device.accountId, {
         screenshots,
         status: 'active',
@@ -185,18 +273,15 @@ export class DeviceService {
       await this.deviceRepository.updateById(accountId, {status: 'error'});
       throw err;
     }
-
     return this.deviceRepository.findById(device.accountId);
   }
 
   async syncAllDevices(): Promise<Device[]> {
     const devices = await this.deviceRepository.find();
     const updatedDevices: Device[] = [];
-
     for (const device of devices) {
       try {
         await this.deviceRepository.updateById(device.accountId, {status: 'syncing'});
-
         if (device.screenshots && device.screenshots.length) {
           for (const file of device.screenshots) {
             if (fs.existsSync(file)) {
@@ -204,7 +289,6 @@ export class DeviceService {
             }
           }
         }
-
         const screenshots = await this.takeScreenshot(
           device.contentUrl,
           device.resolution,
@@ -212,15 +296,12 @@ export class DeviceService {
           device.deviceName,
           device.imageFormat,
         );
-
         const now = new Date().toISOString();
-
         await this.deviceRepository.updateById(device.accountId, {
           screenshots,
           status: 'active',
           lastSync: now,
         });
-
         const updated = await this.deviceRepository.findById(device.accountId);
         updatedDevices.push(updated);
       } catch (err) {
@@ -228,7 +309,6 @@ export class DeviceService {
         await this.deviceRepository.updateById(device.accountId, {status: 'error'});
       }
     }
-
     return updatedDevices;
   }
 
@@ -242,9 +322,7 @@ export class DeviceService {
     if (!existing) {
       throw new HttpErrors.NotFound(`Device with accountId ${accountId} not found`);
     }
-
     const now = new Date().toISOString();
-
     const resolutionChanged =
       devicePatch.resolution !== undefined &&
       devicePatch.resolution !== existing.resolution;
@@ -262,7 +340,6 @@ export class DeviceService {
 
     if (urlChanged || resolutionChanged || formatChanged) {
       await this.deviceRepository.updateById(accountId, {status: 'syncing'});
-
       try {
         if (existing.screenshots && existing.screenshots.length) {
           for (const file of existing.screenshots) {
@@ -271,9 +348,7 @@ export class DeviceService {
             }
           }
         }
-
         const updatedDevice = await this.deviceRepository.findById(accountId);
-
         const screenshots = await this.takeScreenshot(
           updatedDevice.contentUrl,
           updatedDevice.resolution,
@@ -281,7 +356,6 @@ export class DeviceService {
           updatedDevice.deviceName,
           updatedDevice.imageFormat,
         );
-
         await this.deviceRepository.updateById(accountId, {
           screenshots,
           status: 'active',
@@ -292,7 +366,6 @@ export class DeviceService {
         throw err;
       }
     }
-
     return this.deviceRepository.findById(accountId);
   }
 
@@ -301,7 +374,6 @@ export class DeviceService {
     if (!device) {
       throw new HttpErrors.NotFound(`Device with accountId ${accountId} not found`);
     }
-
     if (device.screenshots && device.screenshots.length) {
       for (const file of device.screenshots) {
         if (fs.existsSync(file)) {
@@ -309,7 +381,6 @@ export class DeviceService {
         }
       }
     }
-
     await this.deviceRepository.deleteById(accountId);
   }
 }
