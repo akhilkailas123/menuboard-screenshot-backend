@@ -164,8 +164,6 @@ export class DeviceService {
     const seenAssetIds = new Set<string>([firstSlide.assetId]);
     const firstAssetId = firstSlide.assetId;
     let lastSeenToken = firstSlide.token; // track token to detect any change
-    let duplicateStreak = 0; // consecutive rotations all pointing to already-seen assets
-
     const MAX_WAIT_MS = 120_000;    // up to 2 min to observe a full rotation
     const POLL_INTERVAL_MS = 1_000;
     const startTime = Date.now();
@@ -198,7 +196,6 @@ export class DeviceService {
       // New asset we haven't seen yet → capture it
       if (!seenAssetIds.has(current.assetId)) {
         seenAssetIds.add(current.assetId);
-        duplicateStreak = 0; // reset — we found a genuinely new slide
 
         const slideIndex = seenAssetIds.size; // 2, 3, 4 …
         console.log(`[Screenshot] New unique slide #${slideIndex} (assetId: ${current.assetId})`);
@@ -214,16 +211,11 @@ export class DeviceService {
         console.log('[Screenshot] Saved:', slideFilePath);
         filePaths.push(slideFilePath);
       } else {
-        duplicateStreak++;
+        // Any already-seen assetId means the playlist has looped — stop immediately.
         console.log(
-          `[Screenshot] Skipping duplicate assetId: ${current.assetId} (streak: ${duplicateStreak})`,
+          `[Screenshot] Duplicate assetId: ${current.assetId} — playlist fully captured, stopping.`,
         );
-        // 3 consecutive rotations all pointing to already-seen assets →
-        // the full playlist has cycled, stop early instead of waiting 2 min.
-        if (duplicateStreak >= 3) {
-          console.log('[Screenshot] Full rotation confirmed (3 consecutive duplicates), stopping.');
-          break;
-        }
+        break;
       }
     }
 
